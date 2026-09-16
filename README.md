@@ -70,6 +70,65 @@ for r in result["flagged"]:
     print(f"  {r.entry.id}: {r.action} (score={r.stale_score})")
 ```
 
+
+## Real-world memory profiles
+
+Illustrative patterns you will see when scanning agent memory stores. Numbers are examples — thresholds stay the defaults above unless you change them.
+
+### Healthy profile
+
+Stable agent memory over a long session: most facts score low, few contradictions, no duplicate explosions.
+
+```text
+$ memwatch scan memories.json --verbose
+Scanned 128 entries
+Flagged: 4/128 (3%)
+
+  fact_012: KEEP   score=0.12  age=3d   confirms=4
+  fact_044: KEEP   score=0.18  age=9d   confirms=2
+  fact_091: REFRESH score=0.62 age=28d  confirms=1  # borderline age
+  fact_110: REVIEW  score=0.45 age=5d   contradicts=fact_019
+
+Suggested: reconfirm fact_091; resolve contradiction on fact_110.
+```
+
+Signals of health: flagged rate under ~10%, almost no DELETE, confirms growing on core facts.
+
+### Slow leak / rot pattern
+
+Memory grows while quality drops — new duplicates and unresolved contradictions pile up over an hour of agent work.
+
+```text
+$ memwatch scan memories.json --format json | head
+{
+  "total_entries": 640,
+  "flagged": 210,
+  "actions": {"DELETE": 48, "MERGE": 71, "REVIEW": 55, "REFRESH": 36, "KEEP": 430}
+}
+
+$ memwatch scan memories.json --verbose | tail -5
+  fact_501: DELETE score=0.91 age=52d confirms=0
+  fact_512: MERGE  score=0.70 duplicate_of=fact_088
+  fact_520: MERGE  score=0.68 duplicate_of=fact_088
+  fact_601: REVIEW score=0.55 contradicts=fact_012
+  fact_630: DELETE score=0.88 age=41d confirms=0
+```
+
+Signals of rot: flagged rate climbing session over session, many MERGE on the same id, DELETE cluster on never-confirmed facts. Wire `memwatch scan --format json` into CI and fail when `len(flagged)/total_entries` exceeds your budget (e.g. 0.15).
+
+### CI-style gate
+
+```bash
+# Example: fail the job when more than 15% of facts are flagged
+python - <<'PY'
+from memwatch import analyze
+r = analyze("memories.json")
+rate = len(r["flagged"]) / max(r["total_entries"], 1)
+print(f"flagged_rate={rate:.2%}")
+raise SystemExit(0 if rate <= 0.15 else 1)
+PY
+```
+
 ## License
 
 MIT © Yunare Maia
