@@ -116,11 +116,29 @@ def fix(path, dry_run, threshold):
 
 @cli.command()
 @click.argument("path", type=click.Path(exists=True))
-def dashboard(path):
-    """Show ASCII health dashboard."""
+@click.option("--format", "fmt", type=click.Choice(["text", "json"]), default="text")
+def dashboard(path, fmt):
+    """Show health dashboard (text) or JSON export for tools/CI."""
     result = analyze(path)
     stats = result["stats"]
     total = result["total_entries"]
+
+    if fmt == "json":
+        click.echo(json.dumps({
+            "store": str(path),
+            "total_entries": total,
+            "stats": stats,
+            "flagged": [
+                {
+                    "id": r.entry.id,
+                    "score": r.stale_score,
+                    "action": r.action,
+                    "reasons": r.reasons,
+                }
+                for r in result.get("flagged", result.get("reports", []))
+            ],
+        }, indent=2))
+        return
 
     click.echo("┌─────────────────────────────────────┐")
     click.echo("│       📊 MEMWATCH DASHBOARD         │")
@@ -132,6 +150,17 @@ def dashboard(path):
     click.echo(f"│ Contradictions: {stats['with_contradictions']:<21} │")
     click.echo(f"│ Duplicates: {stats['with_duplicates']:<24} │")
     click.echo("└─────────────────────────────────────┘")
+
+
+@cli.command("report")
+@click.argument("path", type=click.Path(exists=True))
+@click.option("--threshold", default=0.6, help="Stale score threshold (0-1)")
+@click.option("--format", "fmt", type=click.Choice(["text", "json"]), default="json")
+def report(path, threshold, fmt):
+    """Export a health report (default JSON for CI/tools)."""
+    # Reuse scan behavior by invoking the same analyze path.
+    ctx = click.get_current_context()
+    ctx.invoke(scan, path=path, threshold=threshold, verbose=False, fmt=fmt)
 
 
 def main():
