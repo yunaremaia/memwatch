@@ -73,3 +73,11 @@ for r in result["flagged"]:
 ## License
 
 MIT © Yunare Maia
+
+## Troubleshooting
+
+| Issue | Fix |
+|-------|-----|
+| Empty scan result | Confirm the path is JSON/JSONL and readable |
+| High duplicate score | Deduplicate similar facts before agents write more |
+| CI noise | Use `--format json` and fail only on severity thresholds |
