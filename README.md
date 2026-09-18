@@ -42,6 +42,12 @@ memwatch dashboard path/to/memories.json
 - **SQLite** — `memories` table with standard columns
 - **Auto-detect** — pass any path, memwatch figures it out
 
+When using the Python API with a custom SQLite table, pass a simple identifier
+such as `agent_memories` to `parse_sqlite_store`. Table names are validated
+against `[a-zA-Z_][a-zA-Z0-9_]*`; SQL fragments such as `memories; DROP TABLE
+memories; --` are rejected. SQLite table names cannot be bound as query
+parameters, so do not construct or modify the table name from untrusted input.
+
 ## Scoring
 
 Each memory entry gets a **stale score** (0.0 = fresh, 1.0 = rotten):
