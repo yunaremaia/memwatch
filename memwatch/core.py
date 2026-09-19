@@ -217,11 +217,11 @@ def parse_json_store(path: str) -> list[MemoryEntry]:
     return entries
 
 import re
-_TABLE_NAME_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
+SAFE_TABLE_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 
 def parse_sqlite_store(path: str, table: str = "memories") -> list[MemoryEntry]:
     """Parse a SQLite memory store."""
-    if _TABLE_NAME_RE.fullmatch(table) is None:
+    if SAFE_TABLE_RE.fullmatch(table) is None:
         raise ValueError("table must be a valid SQLite identifier")
     
     import sqlite3
