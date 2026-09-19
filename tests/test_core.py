@@ -139,11 +139,11 @@ class TestParsers:
             "memories; DROP TABLE memories; --",
             "memories UNION SELECT * FROM users",
             "memories --",
+            ""
         ]
         for bad_table in malicious_table_names:
             with pytest.raises(ValueError, match="valid SQLite identifier"):
                 parse_sqlite_store("dummy_path.db", table=bad_table)
-        
         #Successfull parsing of a valid database
         assert len(parse_sqlite_store(sqlite_store)) == 2
 
