@@ -222,7 +222,7 @@ SAFE_TABLE_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 def parse_sqlite_store(path: str, table: str = "memories") -> list[MemoryEntry]:
     """Parse a SQLite memory store."""
     if SAFE_TABLE_RE.fullmatch(table) is None:
-        raise ValueError("table must be a valid SQLite identifier")
+        raise ValueError("Invalid table name")
     
     import sqlite3
     conn = sqlite3.connect(path)

@@ -142,7 +142,7 @@ class TestParsers:
             ""
         ]
         for bad_table in malicious_table_names:
-            with pytest.raises(ValueError, match="valid SQLite identifier"):
+            with pytest.raises(ValueError, match="Invalid table name"):
                 parse_sqlite_store("dummy_path.db", table=bad_table)
         #Successfull parsing of a valid database
         assert len(parse_sqlite_store(sqlite_store)) == 2
