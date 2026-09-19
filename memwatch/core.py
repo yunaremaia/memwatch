@@ -2,6 +2,8 @@
 
 __version__ = "0.1.0"
 
+import re
+
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
@@ -217,8 +219,13 @@ def parse_json_store(path: str) -> list[MemoryEntry]:
     return entries
 
 
+SAFE_TABLE_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
+
+
 def parse_sqlite_store(path: str, table: str = "memories") -> list[MemoryEntry]:
     """Parse a SQLite memory store."""
+    if not SAFE_TABLE_RE.match(table):
+        raise ValueError(f"Invalid table name: {table}")
     import sqlite3
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
