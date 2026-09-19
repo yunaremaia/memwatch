@@ -133,6 +133,19 @@ class TestParsers:
         entries = parse_sqlite_store(sqlite_store)
         assert len(entries) == 2
         assert entries[0].id == "s1"
+    
+    def test_sqlite_parser_rejects_injected_table_name(self, sqlite_store):
+        malicious_table_names = [
+            "memories; DROP TABLE memories; --",
+            "memories UNION SELECT * FROM users",
+            "memories --",
+            ""
+        ]
+        for bad_table in malicious_table_names:
+            with pytest.raises(ValueError, match="Invalid table name"):
+                parse_sqlite_store("dummy_path.db", table=bad_table)
+        #Successfull parsing of a valid database
+        assert len(parse_sqlite_store(sqlite_store)) == 2
 
 
 # ── Integration tests ────────────────────────────────────────────────────

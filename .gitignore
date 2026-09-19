@@ -13,3 +13,7 @@ venv/
 .coverage
 htmlcov/
 *.egg
+pycache/
+*.pyc
+__pycache__/*.pyc
+__pycache__/
