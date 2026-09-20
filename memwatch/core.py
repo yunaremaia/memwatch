@@ -2,6 +2,12 @@
 
 __version__ = "0.1.0"
 
+import json
+import logging
+import re
+
+logger = logging.getLogger(__name__)
+
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
@@ -160,7 +166,6 @@ def _detect_contradictions_index(entries: list[MemoryEntry]) -> dict[str, list[M
 
 def _tokenize(text: str) -> set[str]:
     """Tokenize text into normalized words for indexing."""
-    # Lowercase, split on non-alphanumeric, filter short tokens
     return {w for w in text.lower().split() if len(w) >= 3}
 
 
@@ -168,12 +173,9 @@ def _normalize(text: str) -> set[str]:
     """Normalize text for comparison: lowercase, strip punctuation, handle contractions."""
     import re
     t = text.lower()
-    # Expand common contractions
     t = t.replace("n't", " not").replace("'s", " is").replace("'re", " are")
-    # Remove non-alphanumeric except spaces
     t = re.sub(r'[^a-z0-9\s]', '', t)
     words = set(t.split())
-    # Simple stemming: remove trailing 's' for plurals/verbs
     return {w[:-1] if w.endswith('s') and len(w) > 3 else w for w in words}
 
 
@@ -185,26 +187,21 @@ def _are_contradictory(text_a: str, text_b: str) -> bool:
     nb = _normalize(b)
     
     for pos, neg in NEGATION_PAIRS:
-        # Check both directions: pos in a + neg in b, or neg in a + pos in b
         if (pos in a and neg in b) or (neg in a and pos in b):
             overlap = na & nb
             if len(overlap) >= 2:
                 return True
-        # Handle "not X" vs "X" pattern
         if (f"not {pos}" in b and pos in a) or (f"not {pos}" in a and pos in b):
             overlap = na & nb
             if len(overlap) >= 2:
                 return True
     
-    # Handle "not {word}" for shared words
-    # Find words preceded by "not" in one text that appear normally in the other
     words_a = a.split()
     words_b = b.split()
     
     not_words_a = {words_a[i+1] for i, w in enumerate(words_a) if w == "not" and i+1 < len(words_a)}
     not_words_b = {words_b[i+1] for i, w in enumerate(words_b) if w == "not" and i+1 < len(words_b)}
     
-    # If a word is "not X" in one and plain X in the other, it's a contradiction
     for nw in not_words_a:
         if nw in set(words_b):
             return True
@@ -218,7 +215,7 @@ def _are_contradictory(text_a: str, text_b: str) -> bool:
 # ── Deduplication ─────────────────────────────────────────────────────────
 
 def find_duplicates(entries: list[MemoryEntry], threshold: float = 0.85) -> dict[str, list[MemoryEntry]]:
-    """Group entries with high word-overlap (cheap, no embeddings needed)."""
+    """Group entries with high word-overlap."""
     from collections import defaultdict
     groups: dict[str, list[MemoryEntry]] = defaultdict(list)
     seen = set()
@@ -248,13 +245,44 @@ def _jaccard(a: str, b: str) -> float:
 
 # ── Parsers ──────────────────────────────────────────────────────────────
 
-def parse_json_store(path: str) -> list[MemoryEntry]:
-    """Parse a JSON memory store (common format: {"facts": [...], "episodes": [...]})."""
-    import json
+def _is_jsonl(path: str) -> bool:
+    """Detect JSONL format: file has multiple non-empty lines, each parseable as JSON."""
+    with open(path) as f:
+        lines = [line.strip() for line in f if line.strip()]
+    if len(lines) < 2:
+        return False
+    jsonl_count = 0
+    for line in lines[:5]:
+        if line.startswith('{') or line.startswith('['):
+            try:
+                json.loads(line)
+                jsonl_count += 1
+            except json.JSONDecodeError:
+                pass
+    return jsonl_count >= 2
+
+
+def parse_json_store(path: str, fmt: str = "auto") -> list[MemoryEntry]:
+    """Parse a JSON memory store. Auto-detects JSON vs JSONL format.
+
+    Supports:
+    - Single JSON document (list or dict with known keys)
+    - JSONL format (one JSON object per line)
+
+    Args:
+        path: Path to the JSON/JSONL file
+        fmt: Format to parse — 'json', 'jsonl', or 'auto' (default: auto-detect)
+    """
+    if fmt == "auto":
+        fmt = "jsonl" if _is_jsonl(path) else "json"
+
+    if fmt == "jsonl":
+        return _parse_jsonl_store(path)
+
+    # Original JSON parsing logic
     with open(path) as f:
         data = json.load(f)
     entries = []
-    # Support multiple shapes
     items = []
     if isinstance(data, list):
         items = data
@@ -280,14 +308,46 @@ def parse_json_store(path: str) -> list[MemoryEntry]:
         entries.append(entry)
     return entries
 
-import re
+
+def _parse_jsonl_store(path: str) -> list[MemoryEntry]:
+    """Parse a JSONL memory store (one JSON object per line)."""
+    entries = []
+    with open(path) as f:
+        for line_num, line in enumerate(f, 1):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                item = json.loads(line)
+            except json.JSONDecodeError as e:
+                logger.warning(f"Skipping malformed JSONL line {line_num}: {e}")
+                continue
+
+            if isinstance(item, str):
+                item = {"id": item, "content": item}
+            elif not isinstance(item, dict):
+                logger.warning(f"Skipping non-object JSONL line {line_num}: {type(item)}")
+                continue
+
+            entry = MemoryEntry(
+                id=str(item.get("id", item.get("key", f"line_{line_num}"))),
+                content=item.get("content", item.get("text", item.get("value", ""))),
+                created_at=_parse_ts(item.get("created_at", item.get("timestamp", ""))),
+                confirmed_count=int(item.get("confirmed_count", item.get("confirmations", 0))),
+                last_confirmed_at=_parse_ts(item.get("last_confirmed_at")) if item.get("last_confirmed_at") else None,
+                metadata={k: v for k, v in item.items() if k not in ("id", "content", "text", "value", "created_at", "timestamp")},
+            )
+            entries.append(entry)
+    return entries
+
+
 SAFE_TABLE_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
+
 
 def parse_sqlite_store(path: str, table: str = "memories") -> list[MemoryEntry]:
     """Parse a SQLite memory store."""
-    if SAFE_TABLE_RE.fullmatch(table) is None:
-        raise ValueError("Invalid table name")
-    
+    if not SAFE_TABLE_RE.match(table):
+        raise ValueError(f"Invalid table name: {table}")
     import sqlite3
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
@@ -308,16 +368,17 @@ def parse_sqlite_store(path: str, table: str = "memories") -> list[MemoryEntry]:
     return entries
 
 
-def parse_store(path: str) -> list[MemoryEntry]:
+def parse_store(path: str, fmt: str = "auto") -> list[MemoryEntry]:
     """Auto-detect format and parse."""
-    if path.endswith(".json"):
-        return parse_json_store(path)
+    if path.endswith(".jsonl"):
+        return parse_json_store(path, fmt="jsonl")
+    elif path.endswith(".json"):
+        return parse_json_store(path, fmt=fmt)
     elif path.endswith(".db") or path.endswith(".sqlite"):
         return parse_sqlite_store(path)
     else:
-        # Try JSON first, then SQLite
         try:
-            return parse_json_store(path)
+            return parse_json_store(path, fmt=fmt)
         except Exception:
             return parse_sqlite_store(path)
 
@@ -330,7 +391,6 @@ def _parse_ts(ts) -> datetime:
         return datetime.now(timezone.utc)
     if isinstance(ts, (int, float)):
         return datetime.fromtimestamp(ts, tz=timezone.utc)
-    # ISO format
     try:
         dt = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
         return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
@@ -340,9 +400,9 @@ def _parse_ts(ts) -> datetime:
 
 # ── Analysis pipeline ────────────────────────────────────────────────────
 
-def analyze(path: str, stale_threshold: float = 0.6, use_index: bool | None = None) -> dict:
+def analyze(path: str, stale_threshold: float = 0.6, fmt: str = "auto", use_index: bool | None = None) -> dict:
     """Run full analysis on a memory store."""
-    entries = parse_store(path)
+    entries = parse_store(path, fmt=fmt)
     contradictions = detect_contradictions(entries)
     duplicates = find_duplicates(entries)
     reports = []
