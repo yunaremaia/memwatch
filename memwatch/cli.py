@@ -44,9 +44,10 @@ def cli():
 @click.option("--threshold", default=0.6, help="Stale score threshold (0-1)")
 @click.option("--verbose", "-v", is_flag=True, help="Show full content")
 @click.option("--format", "fmt", type=click.Choice(["text", "json"]), default="text")
-def scan(path, threshold, verbose, fmt):
+@click.option("--index/--no-index", default=None, help="Force inverted index for contradiction detection (auto-enabled for stores >500 entries)")
+def scan(path, threshold, verbose, fmt, index):
     """Scan a memory store and report health."""
-    result = analyze(path, stale_threshold=threshold)
+    result = analyze(path, stale_threshold=threshold, use_index=index)
 
     if fmt == "json":
         output = {

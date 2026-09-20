@@ -193,3 +193,66 @@ class TestAnalyze:
             result = analyze(f.name)
             assert len(result["flagged"]) >= 1
             assert result["reports"][0].stale_score > 0.5
+
+
+# ── Inverted index tests (issue #53) ─────────────────────────────────────
+
+def test_detect_contradictions_small_store_uses_scan(sample_entries):
+    """Small stores (<500 entries) use O(n²) scan — same result."""
+    result = detect_contradictions(sample_entries)
+    # e3 and e4 contradict (TypeScript vs JavaScript)
+    assert "e3" in result or "e4" in result
+
+
+def test_detect_contradictions_large_store_uses_index():
+    """Large stores (>500 entries) use inverted index."""
+    now = datetime.now(timezone.utc)
+    entries = [
+        MemoryEntry(id=f"e{i}", content=f"Uses library{i % 50} for auth", created_at=now)
+        for i in range(600)
+    ]
+    # Add a known contradiction pair
+    entries.append(MemoryEntry(id="c1", content="Uses JWT for authentication", created_at=now))
+    entries.append(MemoryEntry(id="c2", content="Doesn't use JWT for auth", created_at=now))
+
+    result = detect_contradictions(entries)
+    assert "c1" in result
+    assert "c2" in result
+
+
+def test_contradiction_index_class():
+    """ContradictionIndex builds and queries correctly."""
+    from memwatch.core import ContradictionIndex
+    now = datetime.now(timezone.utc)
+    entries = [
+        MemoryEntry(id="a", content="Uses React for frontend", created_at=now),
+        MemoryEntry(id="b", content="Uses Vue for frontend", created_at=now),
+        MemoryEntry(id="c", content="Database is PostgreSQL", created_at=now),
+    ]
+    idx = ContradictionIndex(entries)
+    # "for" and "frontend" are shared tokens → a,b are candidates
+    candidates = idx.find_candidates()
+    assert ("a", "b") in candidates or ("b", "a") in candidates
+    # c shares no tokens with a or b
+    assert not any("c" in pair for pair in candidates)
+
+
+def test_tokenize_filters_short_tokens():
+    """_tokenize drops tokens shorter than 3 chars."""
+    from memwatch.core import _tokenize
+    tokens = _tokenize("I am a go dev")
+    assert "i" not in tokens
+    assert "am" not in tokens
+    assert "dev" in tokens
+
+
+def test_detect_contradictions_empty():
+    """Empty entry list returns empty dict."""
+    assert detect_contradictions([]) == {}
+
+
+def test_detect_contradictions_single():
+    """Single entry has no contradictions."""
+    now = datetime.now(timezone.utc)
+    entries = [MemoryEntry(id="solo", content="Only entry here", created_at=now)]
+    assert detect_contradictions(entries) == {}
