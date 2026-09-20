@@ -45,9 +45,11 @@ def cli():
 @click.option("--verbose", "-v", is_flag=True, help="Show full content")
 @click.option("--format", "fmt", type=click.Choice(["text", "json"]), default="text")
 @click.option("--index/--no-index", default=None, help="Force inverted index for contradiction detection (auto-enabled for stores >500 entries)")
-def scan(path, threshold, verbose, fmt, index):
+@click.option("--store-format", type=click.Choice(["auto", "json", "jsonl"]), default="auto",
+              help="Input file format (default: auto-detect)")
+def scan(path, threshold, verbose, fmt, index, store_format):
     """Scan a memory store and report health."""
-    result = analyze(path, stale_threshold=threshold, use_index=index)
+    result = analyze(path, stale_threshold=threshold, fmt=store_format, use_index=index)
 
     if fmt == "json":
         output = {
@@ -86,9 +88,11 @@ def scan(path, threshold, verbose, fmt, index):
 @click.argument("path", type=click.Path(exists=True))
 @click.option("--dry-run", is_flag=True, help="Show what would be deleted without deleting")
 @click.option("--threshold", default=0.8, help="Delete threshold (0-1)")
-def fix(path, dry_run, threshold):
+@click.option("--store-format", type=click.Choice(["auto", "json", "jsonl"]), default="auto",
+              help="Input file format (default: auto-detect)")
+def fix(path, dry_run, threshold, store_format):
     """Suggest or apply fixes for stale entries."""
-    result = analyze(path, stale_threshold=threshold)
+    result = analyze(path, stale_threshold=threshold, fmt=store_format)
     to_delete = [r for r in result["reports"] if r.action == "DELETE"]
     to_merge = [r for r in result["reports"] if r.action == "MERGE"]
 
@@ -159,9 +163,8 @@ def dashboard(path, fmt):
 @click.option("--format", "fmt", type=click.Choice(["text", "json"]), default="json")
 def report(path, threshold, fmt):
     """Export a health report (default JSON for CI/tools)."""
-    # Reuse scan behavior by invoking the same analyze path.
     ctx = click.get_current_context()
-    ctx.invoke(scan, path=path, threshold=threshold, verbose=False, fmt=fmt)
+    ctx.invoke(scan, path=path, threshold=threshold, verbose=False, fmt=fmt, store_format="auto")
 
 
 def main():

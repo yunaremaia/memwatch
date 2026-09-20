@@ -9,6 +9,7 @@ from memwatch.core import (
     parse_store,
     parse_json_store,
     parse_sqlite_store,
+    _parse_jsonl_store,
 )
 
 __all__ = [
@@ -20,4 +21,5 @@ __all__ = [
     "parse_store",
     "parse_json_store",
     "parse_sqlite_store",
+    "_parse_jsonl_store",
 ]
