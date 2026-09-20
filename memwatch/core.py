@@ -90,14 +90,78 @@ def compute_stale_score(entry: MemoryEntry, all_entries: list[MemoryEntry]) -> S
 # ── Contradiction detection ───────────────────────────────────────────────
 
 def detect_contradictions(entries: list[MemoryEntry]) -> dict[str, list[MemoryEntry]]:
-    """Find pairs that contradict each other via negation patterns."""
+    """Find pairs that contradict each other via negation patterns.
+
+    Auto-switches to inverted index for stores >500 entries (O(n) vs O(n²)).
+    """
+    use_index = len(entries) > 500
+    if not use_index:
+        return _detect_contradictions_scan(entries)
+    return _detect_contradictions_index(entries)
+
+
+def _detect_contradictions_scan(entries: list[MemoryEntry]) -> dict[str, list[MemoryEntry]]:
+    """O(n²) brute-force scan — accurate for small stores."""
     contradictions: dict[str, list[MemoryEntry]] = {}
     for i, a in enumerate(entries):
-        for b in entries[i+1:]:
+        for b in entries[i + 1:]:
             if _are_contradictory(a.content, b.content):
                 contradictions.setdefault(a.id, []).append(b)
                 contradictions.setdefault(b.id, []).append(a)
     return contradictions
+
+
+class ContradictionIndex:
+    """Inverted index for O(n) contradiction candidate lookup.
+
+    Builds a token → entry_id index in O(n), then checks only entries
+    sharing at least one token as contradiction candidates.
+    """
+
+    def __init__(self, entries: list[MemoryEntry]):
+        self.entries = {e.id: e for e in entries}
+        self.token_index: dict[str, set[str]] = {}
+        self._build(entries)
+
+    def _build(self, entries: list[MemoryEntry]) -> None:
+        """Build inverted index: normalized token → set of entry IDs."""
+        for entry in entries:
+            for token in _tokenize(entry.content):
+                self.token_index.setdefault(token, set()).add(entry.id)
+
+    def find_candidates(self) -> set[tuple[str, str]]:
+        """Return candidate pairs (id_a, id_b) that share tokens."""
+        candidates: set[tuple[str, str]] = set()
+        for ids in self.token_index.values():
+            if len(ids) < 2:
+                continue
+            id_list = sorted(ids)
+            for i, a in enumerate(id_list):
+                for b in id_list[i + 1:]:
+                    candidates.add((a, b))
+        return candidates
+
+    def find_contradictions(self) -> dict[str, list[MemoryEntry]]:
+        """Find contradictions using candidate pairs from the index."""
+        contradictions: dict[str, list[MemoryEntry]] = {}
+        for id_a, id_b in self.find_candidates():
+            a, b = self.entries[id_a], self.entries[id_b]
+            if _are_contradictory(a.content, b.content):
+                contradictions.setdefault(a.id, []).append(b)
+                contradictions.setdefault(b.id, []).append(a)
+        return contradictions
+
+
+def _detect_contradictions_index(entries: list[MemoryEntry]) -> dict[str, list[MemoryEntry]]:
+    """O(n) inverted-index detection for large stores."""
+    index = ContradictionIndex(entries)
+    return index.find_contradictions()
+
+
+def _tokenize(text: str) -> set[str]:
+    """Tokenize text into normalized words for indexing."""
+    # Lowercase, split on non-alphanumeric, filter short tokens
+    return {w for w in text.lower().split() if len(w) >= 3}
 
 
 def _normalize(text: str) -> set[str]:
@@ -276,7 +340,7 @@ def _parse_ts(ts) -> datetime:
 
 # ── Analysis pipeline ────────────────────────────────────────────────────
 
-def analyze(path: str, stale_threshold: float = 0.6) -> dict:
+def analyze(path: str, stale_threshold: float = 0.6, use_index: bool | None = None) -> dict:
     """Run full analysis on a memory store."""
     entries = parse_store(path)
     contradictions = detect_contradictions(entries)
