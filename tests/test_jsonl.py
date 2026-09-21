@@ -154,6 +154,22 @@ class TestParseJsonlStore:
         assert entries[0].confirmed_count == 5
         assert entries[1].confirmed_count == 3
 
+    def test_schema_violation_warning_includes_line_number(self, tmp_path, caplog):
+        p = tmp_path / "invalid.jsonl"
+        p.write_text(
+            "\n".join([
+                json.dumps({"id": "1", "content": "good"}),
+                json.dumps({"id": "2", "content": None}),
+                json.dumps({"id": "3", "content": "also good"}),
+            ])
+        )
+
+        entries = parse_json_store(str(p), fmt="jsonl")
+
+        assert [entry.id for entry in entries] == ["1", "3"]
+        assert "line 2" in caplog.text
+        assert "content is not a string" in caplog.text
+
     def test_empty_file_returns_empty(self, tmp_path):
         p = tmp_path / "empty.jsonl"
         p.write_text("")
