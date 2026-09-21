@@ -30,6 +30,13 @@ class MemoryEntry:
 
 
 @dataclass
+class ParseResult:
+    """Parsed entries together with details about records that were skipped."""
+    entries: list[MemoryEntry]
+    skipped_entry_details: list[dict[str, str]] = field(default_factory=list)
+
+
+@dataclass
 class StaleReport:
     """Result of staleness analysis for one entry."""
     entry: MemoryEntry
@@ -262,6 +269,120 @@ def _is_jsonl(path: str) -> bool:
     return jsonl_count >= 2
 
 
+def _parse_valid_timestamp(value: Any) -> datetime | None:
+    """Return a parsed timestamp, or ``None`` when a supplied value is invalid."""
+    if value is None or value == "":
+        return datetime.now(timezone.utc)
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        try:
+            return datetime.fromtimestamp(value, tz=timezone.utc)
+        except (OverflowError, OSError, ValueError):
+            return None
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+def _skipped_entry(location: str, reason: str) -> dict[str, str]:
+    logger.warning("Skipping %s: %s", location, reason)
+    return {"location": location, "reason": reason}
+
+
+def _parse_json_entry(
+    item: Any,
+    location: str,
+    fallback_id: str | None = None,
+) -> tuple[MemoryEntry | None, dict[str, str] | None]:
+    """Validate and parse one JSON entry without aborting the whole store."""
+    if isinstance(item, str):
+        item = {"id": item, "content": item}
+    if not isinstance(item, dict):
+        return None, _skipped_entry(location, "entry is not an object")
+
+    content = item.get("content", item.get("text", item.get("value", "")))
+    if not isinstance(content, str):
+        return None, _skipped_entry(location, "content is not a string")
+
+    confirmed = item.get("confirmed_count", item.get("confirmations", 0))
+    if isinstance(confirmed, str):
+        try:
+            confirmed = int(confirmed)
+        except ValueError:
+            return None, _skipped_entry(
+                location, "confirmed_count is not a valid integer"
+            )
+    elif isinstance(confirmed, bool) or not isinstance(confirmed, int):
+        return None, _skipped_entry(
+            location, "confirmed_count has unexpected type"
+        )
+
+    created_at = _parse_valid_timestamp(
+        item.get("created_at", item.get("timestamp", ""))
+    )
+    if created_at is None:
+        return None, _skipped_entry(location, "created_at is not a valid timestamp")
+
+    entry_id = item.get("id", item.get("key"))
+    if entry_id is None:
+        entry_id = fallback_id if fallback_id is not None else str(hash(content))
+
+    entry = MemoryEntry(
+        id=str(entry_id),
+        content=content,
+        created_at=created_at,
+        confirmed_count=confirmed,
+        last_confirmed_at=_parse_ts(item.get("last_confirmed_at"))
+        if item.get("last_confirmed_at") else None,
+        metadata={
+            k: v for k, v in item.items()
+            if k not in ("id", "content", "text", "value", "created_at", "timestamp")
+        },
+    )
+    return entry, None
+
+
+def _parse_json_store_result(path: str, fmt: str = "auto") -> ParseResult:
+    """Parse a JSON store and retain details about invalid entries."""
+    if fmt == "auto":
+        fmt = "jsonl" if _is_jsonl(path) else "json"
+
+    if fmt == "jsonl":
+        return _parse_jsonl_store_result(path)
+
+    with open(path) as f:
+        data = json.load(f)
+    entries = []
+    skipped_entry_details = []
+    items = []
+    if isinstance(data, list):
+        items = data
+    elif isinstance(data, dict):
+        for key in ("facts", "episodes", "memories", "entries"):
+            if key in data:
+                items.extend(data[key])
+        if not items:
+            items = [
+                {"id": k, **v} if isinstance(v, dict) else {"id": k, "content": str(v)}
+                for k, v in data.items()
+            ]
+
+    for entry_num, item in enumerate(items, 1):
+        entry, skipped = _parse_json_entry(item, f"entry {entry_num}")
+        if entry is not None:
+            entries.append(entry)
+        if skipped is not None:
+            skipped_entry_details.append(skipped)
+    return ParseResult(entries, skipped_entry_details)
+
+
 def parse_json_store(path: str, fmt: str = "auto") -> list[MemoryEntry]:
     """Parse a JSON memory store. Auto-detects JSON vs JSONL format.
 
@@ -273,45 +394,18 @@ def parse_json_store(path: str, fmt: str = "auto") -> list[MemoryEntry]:
         path: Path to the JSON/JSONL file
         fmt: Format to parse — 'json', 'jsonl', or 'auto' (default: auto-detect)
     """
-    if fmt == "auto":
-        fmt = "jsonl" if _is_jsonl(path) else "json"
-
-    if fmt == "jsonl":
-        return _parse_jsonl_store(path)
-
-    # Original JSON parsing logic
-    with open(path) as f:
-        data = json.load(f)
-    entries = []
-    items = []
-    if isinstance(data, list):
-        items = data
-    elif isinstance(data, dict):
-        for key in ("facts", "episodes", "memories", "entries"):
-            if key in data:
-                items.extend(data[key])
-        if not items:
-            items = [{"id": k, **v} if isinstance(v, dict) else {"id": k, "content": str(v)}
-                      for k, v in data.items()]
-
-    for item in items:
-        if isinstance(item, str):
-            item = {"id": item, "content": item}
-        entry = MemoryEntry(
-            id=str(item.get("id", item.get("key", hash(item.get("content", ""))))),
-            content=item.get("content", item.get("text", item.get("value", ""))),
-            created_at=_parse_ts(item.get("created_at", item.get("timestamp", ""))),
-            confirmed_count=int(item.get("confirmed_count", item.get("confirmations", 0))),
-            last_confirmed_at=_parse_ts(item.get("last_confirmed_at")) if item.get("last_confirmed_at") else None,
-            metadata={k: v for k, v in item.items() if k not in ("id", "content", "text", "value", "created_at", "timestamp")},
-        )
-        entries.append(entry)
-    return entries
+    return _parse_json_store_result(path, fmt=fmt).entries
 
 
 def _parse_jsonl_store(path: str) -> list[MemoryEntry]:
     """Parse a JSONL memory store (one JSON object per line)."""
+    return _parse_jsonl_store_result(path).entries
+
+
+def _parse_jsonl_store_result(path: str) -> ParseResult:
+    """Parse a JSONL store and retain line-level skip details."""
     entries = []
+    skipped_entry_details = []
     with open(path) as f:
         for line_num, line in enumerate(f, 1):
             line = line.strip()
@@ -320,25 +414,21 @@ def _parse_jsonl_store(path: str) -> list[MemoryEntry]:
             try:
                 item = json.loads(line)
             except json.JSONDecodeError as e:
-                logger.warning(f"Skipping malformed JSONL line {line_num}: {e}")
+                skipped_entry_details.append(
+                    _skipped_entry(f"line {line_num}", f"malformed JSON: {e}")
+                )
                 continue
 
-            if isinstance(item, str):
-                item = {"id": item, "content": item}
-            elif not isinstance(item, dict):
-                logger.warning(f"Skipping non-object JSONL line {line_num}: {type(item)}")
-                continue
-
-            entry = MemoryEntry(
-                id=str(item.get("id", item.get("key", f"line_{line_num}"))),
-                content=item.get("content", item.get("text", item.get("value", ""))),
-                created_at=_parse_ts(item.get("created_at", item.get("timestamp", ""))),
-                confirmed_count=int(item.get("confirmed_count", item.get("confirmations", 0))),
-                last_confirmed_at=_parse_ts(item.get("last_confirmed_at")) if item.get("last_confirmed_at") else None,
-                metadata={k: v for k, v in item.items() if k not in ("id", "content", "text", "value", "created_at", "timestamp")},
+            entry, skipped = _parse_json_entry(
+                item,
+                f"line {line_num}",
+                fallback_id=f"line_{line_num}",
             )
-            entries.append(entry)
-    return entries
+            if entry is not None:
+                entries.append(entry)
+            if skipped is not None:
+                skipped_entry_details.append(skipped)
+    return ParseResult(entries, skipped_entry_details)
 
 
 SAFE_TABLE_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
@@ -370,17 +460,22 @@ def parse_sqlite_store(path: str, table: str = "memories") -> list[MemoryEntry]:
 
 def parse_store(path: str, fmt: str = "auto") -> list[MemoryEntry]:
     """Auto-detect format and parse."""
+    return _parse_store_result(path, fmt=fmt).entries
+
+
+def _parse_store_result(path: str, fmt: str = "auto") -> ParseResult:
+    """Auto-detect format and retain parser warnings for the analysis summary."""
     if path.endswith(".jsonl"):
-        return parse_json_store(path, fmt="jsonl")
+        return _parse_json_store_result(path, fmt="jsonl")
     elif path.endswith(".json"):
-        return parse_json_store(path, fmt=fmt)
+        return _parse_json_store_result(path, fmt=fmt)
     elif path.endswith(".db") or path.endswith(".sqlite"):
-        return parse_sqlite_store(path)
+        return ParseResult(parse_sqlite_store(path))
     else:
         try:
-            return parse_json_store(path, fmt=fmt)
+            return _parse_json_store_result(path, fmt=fmt)
         except Exception:
-            return parse_sqlite_store(path)
+            return ParseResult(parse_sqlite_store(path))
 
 
 def _parse_ts(ts) -> datetime:
@@ -402,7 +497,8 @@ def _parse_ts(ts) -> datetime:
 
 def analyze(path: str, stale_threshold: float = 0.6, fmt: str = "auto", use_index: bool | None = None) -> dict:
     """Run full analysis on a memory store."""
-    entries = parse_store(path, fmt=fmt)
+    parse_result = _parse_store_result(path, fmt=fmt)
+    entries = parse_result.entries
     contradictions = detect_contradictions(entries)
     duplicates = find_duplicates(entries)
     reports = []
@@ -422,6 +518,8 @@ def analyze(path: str, stale_threshold: float = 0.6, fmt: str = "auto", use_inde
 
     return {
         "total_entries": len(entries),
+        "skipped_entries": len(parse_result.skipped_entry_details),
+        "skipped_entry_details": parse_result.skipped_entry_details,
         "flagged": [r for r in reports if r.needs_attention],
         "healthy": [r for r in reports if not r.needs_attention],
         "reports": reports,

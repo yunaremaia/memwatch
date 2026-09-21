@@ -169,26 +169,53 @@ class TestMalformedEntries:
         ids = sorted(e.id for e in parse_json_store(path))
         assert ids == ["alpha", "beta"]
 
-    def test_timestamp_values_of_wrong_type_do_not_crash(self, tmp_path):
+    def test_invalid_timestamp_values_are_skipped(self, tmp_path, caplog):
         path = _write_json(tmp_path, {"facts": [
             {"id": "a", "content": "x", "created_at": "not-a-date"},
             {"id": "b", "content": "y", "created_at": 12345},
             {"id": "c", "content": "z", "created_at": []},
         ]})
         entries = parse_json_store(path)
-        assert len(entries) == 3
-        assert all(isinstance(e.created_at, datetime) for e in entries)
+        assert [entry.id for entry in entries] == ["b"]
+        assert isinstance(entries[0].created_at, datetime)
+        assert "entry 1" in caplog.text
+        assert "entry 3" in caplog.text
+
+    def test_invalid_confirmed_count_is_skipped(self, tmp_path, caplog):
+        path = _write_json(tmp_path, {"facts": [
+            {"id": "bad", "content": "x", "confirmed_count": "many"},
+            {"id": "good", "content": "y", "confirmed_count": 2},
+        ]})
+
+        entries = parse_json_store(path)
+
+        assert [entry.id for entry in entries] == ["good"]
+        assert "entry 1" in caplog.text
+        assert "confirmed_count is not a valid integer" in caplog.text
+
+    def test_analyze_summarizes_skipped_entries(self, tmp_path):
+        path = _write_json(tmp_path, {"facts": [
+            {"id": "bad-content", "content": None},
+            {"id": "bad-count", "content": "x", "confirmed_count": []},
+            {"id": "good", "content": "y"},
+        ]})
+
+        result = analyze(path)
+
+        assert result["total_entries"] == 1
+        assert result["skipped_entries"] == 2
+        assert len(result["skipped_entry_details"]) == 2
 
 
 # ── None values ──────────────────────────────────────────────────────────
 
 class TestNoneValues:
-    """Explicit ``null`` in the source must behave like a missing field."""
+    """Explicit ``null`` values are handled according to each field's schema."""
 
-    def test_none_content_becomes_empty_string(self, tmp_path):
+    def test_none_content_is_skipped(self, tmp_path, caplog):
         path = _write_json(tmp_path, {"facts": [{"id": "a", "content": None}]})
-        entry = parse_json_store(path)[0]
-        assert entry.content is None or entry.content == ""
+        assert parse_json_store(path) == []
+        assert "content is not a string" in caplog.text
 
     def test_none_created_at_falls_back_to_now(self, tmp_path):
         path = _write_json(tmp_path, {"facts": [{"id": "a", "content": "x",
