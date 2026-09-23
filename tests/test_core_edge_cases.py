@@ -353,6 +353,44 @@ class TestNormalize:
         assert _normalize("...!!!") == set()
 
 
+class TestConservativeStemming:
+    """Issue #63: stemming must not mangle non-plural ``s`` endings."""
+
+    def test_tests_and_test_collapse_to_one_token(self):
+        assert _normalize("tests") == _normalize("test") == {"test"}
+
+    def test_uses_and_user_do_not_collide(self):
+        # "uses" stems to "use"; it must not become "user".
+        assert _normalize("uses") != _normalize("user")
+
+    def test_address_is_not_modified(self):
+        assert _normalize("address") == {"address"}
+
+    def test_process_is_not_modified(self):
+        assert _normalize("process") == {"process"}
+
+    def test_words_ending_in_us_are_not_modified(self):
+        assert _normalize("bonus") == {"bonus"}
+        assert _normalize("status") == {"status"}
+
+    def test_words_ending_in_is_are_not_modified(self):
+        assert _normalize("iris") == {"iris"}
+        assert _normalize("analysis") == {"analysis"}
+
+    def test_genuine_plurals_still_collapse(self):
+        assert _normalize("sessions") == _normalize("session") == {"session"}
+
+    def test_self_match_no_false_contradiction(self):
+        """'address' no longer stems to 'addres' and fails to match itself."""
+        from memwatch.core import _are_contradictory
+
+        # Same shared words including "address"; not contradictory (no negation flip).
+        assert not _are_contradictory(
+            "the service address is fixed and stable",
+            "the service address is changed and unstable",
+        )
+
+
 # ── Stale scoring details ────────────────────────────────────────────────
 
 class TestStaleScoreReasons:

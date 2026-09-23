@@ -177,13 +177,29 @@ def _tokenize(text: str) -> set[str]:
 
 
 def _normalize(text: str) -> set[str]:
-    """Normalize text for comparison: lowercase, strip punctuation, handle contractions."""
+    """Normalize text for comparison: lowercase, strip punctuation, handle contractions.
+
+    Stemming is deliberately conservative: a trailing ``s`` is stripped only
+    for words longer than 3 characters that do not end in ``ss``/``us``/``is``
+    (the common non-plural suffixes). This keeps genuine plural collisions
+    (``tests``→``test``, ``runs``→``run``) while no longer mangling words whose
+    final ``s`` is part of the stem — ``address`` and ``process`` used to lose
+    a character and fail to match themselves, and words like ``iris`` or
+    ``bonus`` are left intact (issue #63).
+    """
     import re
     t = text.lower()
     t = t.replace("n't", " not").replace("'s", " is").replace("'re", " are")
     t = re.sub(r'[^a-z0-9\s]', '', t)
     words = set(t.split())
-    return {w[:-1] if w.endswith('s') and len(w) > 3 else w for w in words}
+    return {_strip_plural(w) for w in words}
+
+
+def _strip_plural(w: str) -> str:
+    """Strip a trailing plural ``s`` only when it is safe to do so."""
+    if len(w) > 3 and w.endswith("s") and not w.endswith(("ss", "us", "is")):
+        return w[:-1]
+    return w
 
 
 def _are_contradictory(text_a: str, text_b: str) -> bool:
