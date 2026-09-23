@@ -38,9 +38,10 @@ memwatch dashboard path/to/memories.json
 
 ## Supported Formats
 
-- **JSON** — `{"facts": [{"id": ..., "content": ..., "created_at": ...}]}`
+- **YAML** — Single-document or multi-document YAML stores (Mem0, Letta)
+- **JSON / JSONL** — `{"facts": [...]}` or line-delimited JSON objects
 - **SQLite** — `memories` table with standard columns
-- **Auto-detect** — pass any path, memwatch figures it out
+- **Auto-detect** — pass any path (`.yaml`, `.yml`, `.json`, `.jsonl`, `.db`), memwatch figures it out
 
 When using the Python API with a custom SQLite table, pass a simple identifier
 such as `agent_memories` to `parse_sqlite_store`. Table names are validated

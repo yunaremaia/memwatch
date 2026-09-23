@@ -275,6 +275,9 @@ def _parse_valid_timestamp(value: Any) -> datetime | None:
         return datetime.now(timezone.utc)
     if isinstance(value, datetime):
         return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    from datetime import date
+    if isinstance(value, date):
+        return datetime.combine(value, datetime.min.time(), tzinfo=timezone.utc)
     if isinstance(value, bool):
         return None
     if isinstance(value, (int, float)):
@@ -334,6 +337,13 @@ def _parse_json_entry(
     if entry_id is None:
         entry_id = fallback_id if fallback_id is not None else str(hash(content))
 
+    meta = {
+        k: v for k, v in item.items()
+        if k not in ("id", "content", "text", "value", "created_at", "timestamp")
+    }
+    if isinstance(item.get("metadata"), dict):
+        meta.update(item["metadata"])
+
     entry = MemoryEntry(
         id=str(entry_id),
         content=content,
@@ -341,10 +351,7 @@ def _parse_json_entry(
         confirmed_count=confirmed,
         last_confirmed_at=_parse_ts(item.get("last_confirmed_at"))
         if item.get("last_confirmed_at") else None,
-        metadata={
-            k: v for k, v in item.items()
-            if k not in ("id", "content", "text", "value", "created_at", "timestamp")
-        },
+        metadata=meta,
     )
     return entry, None
 
@@ -458,6 +465,141 @@ def parse_sqlite_store(path: str, table: str = "memories") -> list[MemoryEntry]:
     return entries
 
 
+def parse_yaml_store(content_or_path: str) -> list[MemoryEntry]:
+    """Parse a YAML memory store.
+
+    Supports:
+    - Single-document YAML (list of entries, container with facts/memories, or single entry)
+    - Multi-document YAML (separated by ---)
+    - File path or raw YAML content string
+
+    Args:
+        content_or_path: Path to the YAML file or raw YAML content string.
+
+    Returns:
+        List of parsed MemoryEntry objects.
+    """
+    return _parse_yaml_store_result(content_or_path).entries
+
+
+def _parse_yaml_store_result(content_or_path: str) -> ParseResult:
+    """Parse a YAML memory store and retain details about skipped entries."""
+    import yaml
+    from pathlib import Path
+
+    raw_content = ""
+    source_name = "yaml"
+
+    if isinstance(content_or_path, str) and "\n" not in content_or_path:
+        try:
+            p = Path(content_or_path)
+            if p.is_file():
+                source_name = str(content_or_path)
+                with open(content_or_path, "r", encoding="utf-8") as f:
+                    raw_content = f.read()
+            else:
+                raw_content = content_or_path
+        except (OSError, ValueError):
+            raw_content = content_or_path
+    else:
+        raw_content = str(content_or_path)
+
+    if not raw_content.strip():
+        return ParseResult([], [])
+
+    entries: list[MemoryEntry] = []
+    skipped_entry_details: list[dict[str, str]] = []
+
+    try:
+        docs = list(yaml.safe_load_all(raw_content))
+    except yaml.YAMLError as e:
+        logger.warning("Malformed YAML in %s: %s", source_name, e)
+        return ParseResult([], [_skipped_entry(source_name, f"malformed YAML: {e}")])
+
+    def _normalize_keys(obj: Any) -> Any:
+        if isinstance(obj, dict):
+            return {str(k): _normalize_keys(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [_normalize_keys(elem) for elem in obj]
+        return obj
+
+    for doc_idx, doc in enumerate(docs, 1):
+        if doc is None:
+            continue
+        doc = _normalize_keys(doc)
+        doc_prefix = f"doc {doc_idx}" if len(docs) > 1 else "entry"
+
+        if isinstance(doc, list):
+            for item_idx, item in enumerate(doc, 1):
+                loc = f"{doc_prefix} item {item_idx}" if len(docs) > 1 else f"entry {item_idx}"
+                entry, skipped = _parse_json_entry(item, loc, fallback_id=f"entry_{len(entries) + 1}")
+                if entry is not None:
+                    entries.append(entry)
+                if skipped is not None:
+                    skipped_entry_details.append(skipped)
+
+        elif isinstance(doc, dict):
+            found_container = False
+            for key in ("facts", "episodes", "memories", "entries"):
+                if key in doc and isinstance(doc[key], list):
+                    found_container = True
+                    for item_idx, item in enumerate(doc[key], 1):
+                        loc = f"{doc_prefix} {key}[{item_idx}]"
+                        entry, skipped = _parse_json_entry(item, loc, fallback_id=f"{key}_{item_idx}")
+                        if entry is not None:
+                            entries.append(entry)
+                        if skipped is not None:
+                            skipped_entry_details.append(skipped)
+                    break
+                elif key in doc and isinstance(doc[key], dict):
+                    found_container = True
+                    for item_idx, (k, v) in enumerate(doc[key].items(), 1):
+                        loc = f"{doc_prefix} {key}[{k}]"
+                        if isinstance(v, dict):
+                            item = {"id": str(k), **v}
+                        else:
+                            item = {"id": str(k), "content": str(v)}
+                        entry, skipped = _parse_json_entry(item, loc, fallback_id=str(k))
+                        if entry is not None:
+                            entries.append(entry)
+                        if skipped is not None:
+                            skipped_entry_details.append(skipped)
+                    break
+
+            if not found_container:
+                if any(k in doc for k in ("content", "text", "value")):
+                    loc = doc_prefix
+                    entry, skipped = _parse_json_entry(doc, loc, fallback_id=f"entry_{len(entries) + 1}")
+                    if entry is not None:
+                        entries.append(entry)
+                    if skipped is not None:
+                        skipped_entry_details.append(skipped)
+                else:
+                    for item_idx, (k, v) in enumerate(doc.items(), 1):
+                        loc = f"{doc_prefix} item {k}"
+                        if isinstance(v, dict):
+                            item = {"id": str(k), **v}
+                        else:
+                            item = {"id": str(k), "content": str(v)}
+                        entry, skipped = _parse_json_entry(item, loc, fallback_id=str(k))
+                        if entry is not None:
+                            entries.append(entry)
+                        if skipped is not None:
+                            skipped_entry_details.append(skipped)
+
+        elif isinstance(doc, str):
+            loc = doc_prefix
+            entry, skipped = _parse_json_entry({"id": f"entry_{len(entries) + 1}", "content": doc}, loc)
+            if entry is not None:
+                entries.append(entry)
+            if skipped is not None:
+                skipped_entry_details.append(skipped)
+        else:
+            skipped_entry_details.append(_skipped_entry(doc_prefix, "document is not an object or list"))
+
+    return ParseResult(entries, skipped_entry_details)
+
+
 def parse_store(path: str, fmt: str = "auto") -> list[MemoryEntry]:
     """Auto-detect format and parse."""
     return _parse_store_result(path, fmt=fmt).entries
@@ -465,17 +607,22 @@ def parse_store(path: str, fmt: str = "auto") -> list[MemoryEntry]:
 
 def _parse_store_result(path: str, fmt: str = "auto") -> ParseResult:
     """Auto-detect format and retain parser warnings for the analysis summary."""
-    if path.endswith(".jsonl"):
+    if fmt in ("yaml", "yml") or path.endswith(".yaml") or path.endswith(".yml"):
+        return _parse_yaml_store_result(path)
+    elif fmt == "jsonl" or path.endswith(".jsonl"):
         return _parse_json_store_result(path, fmt="jsonl")
-    elif path.endswith(".json"):
+    elif fmt == "json" or path.endswith(".json"):
         return _parse_json_store_result(path, fmt=fmt)
-    elif path.endswith(".db") or path.endswith(".sqlite"):
+    elif fmt in ("sqlite", "db") or path.endswith(".db") or path.endswith(".sqlite"):
         return ParseResult(parse_sqlite_store(path))
     else:
         try:
             return _parse_json_store_result(path, fmt=fmt)
         except Exception:
-            return ParseResult(parse_sqlite_store(path))
+            try:
+                return _parse_yaml_store_result(path)
+            except Exception:
+                return ParseResult(parse_sqlite_store(path))
 
 
 def _parse_ts(ts) -> datetime:

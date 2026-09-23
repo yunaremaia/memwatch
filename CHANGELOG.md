@@ -9,3 +9,5 @@ All notable changes to memwatch will be documented in this file.
 - `ContradictionIndex` class with token-based candidate lookup.
 - `--index/--no-index` CLI flag to force-enable/disable the inverted index.
 - JSON and JSONL schema validation with skipped-entry details in analysis results.
+- YAML memory store parser (`parse_yaml_store`) supporting single and multi-document YAML (issue #45).
+- YAML support in CLI via `--store-format yaml` and `--format yaml` (issue #45).
