@@ -43,13 +43,17 @@ def cli():
 @click.argument("path", type=click.Path(exists=True))
 @click.option("--threshold", default=0.6, help="Stale score threshold (0-1)")
 @click.option("--verbose", "-v", is_flag=True, help="Show full content")
-@click.option("--format", "fmt", type=click.Choice(["text", "json"]), default="text")
+@click.option("--format", "fmt", type=click.Choice(["text", "json", "yaml"]), default="text")
 @click.option("--index/--no-index", default=None, help="Force inverted index for contradiction detection (auto-enabled for stores >500 entries)")
-@click.option("--store-format", type=click.Choice(["auto", "json", "jsonl"]), default="auto",
+@click.option("--store-format", type=click.Choice(["auto", "json", "jsonl", "yaml", "yml"]), default="auto",
               help="Input file format (default: auto-detect)")
 def scan(path, threshold, verbose, fmt, index, store_format):
     """Scan a memory store and report health."""
-    result = analyze(path, stale_threshold=threshold, fmt=store_format, use_index=index)
+    effective_store_format = store_format
+    if store_format == "auto" and fmt in ("yaml", "yml"):
+        effective_store_format = "yaml"
+
+    result = analyze(path, stale_threshold=threshold, fmt=effective_store_format, use_index=index)
 
     if fmt == "json":
         output = {
@@ -70,6 +74,26 @@ def scan(path, threshold, verbose, fmt, index, store_format):
         click.echo(json.dumps(output, indent=2))
         return
 
+    if fmt in ("yaml", "yml"):
+        import yaml
+        output = {
+            "store": str(path),
+            "stats": result["stats"],
+            "flagged": [
+                {
+                    "id": r.entry.id,
+                    "score": r.stale_score,
+                    "action": r.action,
+                    "reasons": r.reasons,
+                    "duplicates": [d.id for d in r.duplicates],
+                    "contradictions": [c.id for c in r.contradictions],
+                }
+                for r in result["flagged"]
+            ],
+        }
+        click.echo(yaml.dump(output, sort_keys=False))
+        return
+
     # Text format
     click.echo(f"📊 memwatch — scanning {path}\n")
     stats = result["stats"]
@@ -88,7 +112,7 @@ def scan(path, threshold, verbose, fmt, index, store_format):
 @click.argument("path", type=click.Path(exists=True))
 @click.option("--dry-run", is_flag=True, help="Show what would be deleted without deleting")
 @click.option("--threshold", default=0.8, help="Delete threshold (0-1)")
-@click.option("--store-format", type=click.Choice(["auto", "json", "jsonl"]), default="auto",
+@click.option("--store-format", type=click.Choice(["auto", "json", "jsonl", "yaml", "yml"]), default="auto",
               help="Input file format (default: auto-detect)")
 def fix(path, dry_run, threshold, store_format):
     """Suggest or apply fixes for stale entries."""
@@ -121,7 +145,7 @@ def fix(path, dry_run, threshold, store_format):
 
 @cli.command()
 @click.argument("path", type=click.Path(exists=True))
-@click.option("--format", "fmt", type=click.Choice(["text", "json"]), default="text")
+@click.option("--format", "fmt", type=click.Choice(["text", "json", "yaml"]), default="text")
 def dashboard(path, fmt):
     """Show health dashboard (text) or JSON export for tools/CI."""
     result = analyze(path)
@@ -145,6 +169,24 @@ def dashboard(path, fmt):
         }, indent=2))
         return
 
+    if fmt in ("yaml", "yml"):
+        import yaml
+        click.echo(yaml.dump({
+            "store": str(path),
+            "total_entries": total,
+            "stats": stats,
+            "flagged": [
+                {
+                    "id": r.entry.id,
+                    "score": r.stale_score,
+                    "action": r.action,
+                    "reasons": r.reasons,
+                }
+                for r in result.get("flagged", result.get("reports", []))
+            ],
+        }, sort_keys=False))
+        return
+
     click.echo("┌─────────────────────────────────────┐")
     click.echo("│       📊 MEMWATCH DASHBOARD         │")
     click.echo("├─────────────────────────────────────┤")
@@ -160,11 +202,13 @@ def dashboard(path, fmt):
 @cli.command("report")
 @click.argument("path", type=click.Path(exists=True))
 @click.option("--threshold", default=0.6, help="Stale score threshold (0-1)")
-@click.option("--format", "fmt", type=click.Choice(["text", "json"]), default="json")
-def report(path, threshold, fmt):
+@click.option("--format", "fmt", type=click.Choice(["text", "json", "yaml"]), default="json")
+@click.option("--store-format", type=click.Choice(["auto", "json", "jsonl", "yaml", "yml"]), default="auto",
+              help="Input file format (default: auto-detect)")
+def report(path, threshold, fmt, store_format):
     """Export a health report (default JSON for CI/tools)."""
     ctx = click.get_current_context()
-    ctx.invoke(scan, path=path, threshold=threshold, verbose=False, fmt=fmt, store_format="auto")
+    ctx.invoke(scan, path=path, threshold=threshold, verbose=False, fmt=fmt, store_format=store_format)
 
 
 def main():
