@@ -10,3 +10,5 @@ memwatch.egg-info/entry_points.txt
 memwatch.egg-info/requires.txt
 memwatch.egg-info/top_level.txt
 tests/test_core.py
+tests/test_jsonl.py
+tests/test_sql_injection.py

@@ -5,6 +5,7 @@ __version__ = "0.1.0"
 import json
 import logging
 import re
+import sqlite3 as _sqlite3
 
 logger = logging.getLogger(__name__)
 
@@ -455,16 +456,59 @@ def _parse_jsonl_store_result(path: str) -> ParseResult:
 
 
 SAFE_TABLE_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
+FTS5_SPECIAL_CHARS = re.compile(r"['*:\"]")  # FTS5 special syntax characters
 
 
-def parse_sqlite_store(path: str, table: str = "memories") -> list[MemoryEntry]:
-    """Parse a SQLite memory store."""
+def _validate_table(conn: _sqlite3.Connection, table: str) -> bool:
+    """Validate that table exists in sqlite_master to prevent arbitrary table access."""
+    cursor = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+        (table,),
+    )
+    return cursor.fetchone() is not None
+
+
+def _sanitize_fts5_query(query: str) -> str:
+    """Sanitize FTS5 query string to prevent query injection.
+
+    FTS5 uses single quotes for string literals and * for wildcards.
+    Escape single quotes by doubling them per FTS5 convention.
+    """
+    # Escape single quotes by doubling (FTS5 standard)
+    sanitized = query.replace("'", "''")
+    # Remove other potentially problematic characters
+    sanitized = FTS5_SPECIAL_CHARS.sub("", sanitized)
+    return sanitized
+
+
+def parse_sqlite_store(path: str, table: str = "memories", fts_query: str | None = None) -> list[MemoryEntry]:
+    """Parse a SQLite memory store.
+
+    Security measures:
+    - Table name validated against SAFE_TABLE_RE regex
+    - Table existence verified against sqlite_master
+    - FTS5 queries sanitized to prevent injection
+    """
     if not SAFE_TABLE_RE.match(table):
         raise ValueError(f"Invalid table name: {table}")
     import sqlite3
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
-    cursor = conn.execute(f"SELECT * FROM {table}")
+
+    # Validate table exists in sqlite_master
+    if not _validate_table(conn, table):
+        conn.close()
+        raise ValueError(f"Table '{table}' does not exist in {path}")
+
+    # Build query — use parameterized FTS5 if query provided
+    if fts_query:
+        safe_query = _sanitize_fts5_query(fts_query)
+        cursor = conn.execute(
+            f"SELECT * FROM {table} WHERE {table} MATCH ?",
+            (safe_query,),
+        )
+    else:
+        cursor = conn.execute(f"SELECT * FROM {table}")
     entries = []
     for row in cursor:
         d = dict(row)
