@@ -19,7 +19,7 @@ AI agents with persistent memory (Claude Code, Cursor, custom LLM agents) suffer
 ## Install
 
 ```bash
-pip install memwatch
+pip install git+https://github.com/yunaremaia/memwatch.git
 ```
 
 ## Quick Start
