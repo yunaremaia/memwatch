@@ -1,6 +1,9 @@
 # memwatch — Agent Memory Health Monitor
 
+![CI](https://github.com/yunaremaia/memwatch/actions/workflows/ci.yml/badge.svg)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
+![License](https://img.shields.io/github/license/yunaremaia/memwatch)
+![Stars](https://img.shields.io/github/stars/yunaremaia/memwatch)
 
 Monitor AI agent memory stores for rot, contradictions, and duplicates.
 
@@ -137,6 +140,19 @@ print(f"flagged_rate={rate:.2%}")
 raise SystemExit(0 if rate <= 0.15 else 1)
 PY
 ```
+
+
+If this tool is useful to you, a star helps other people find it.
+
+## Related tools
+
+- **[context-bridge](https://github.com/yunaremaia/context-bridge)** — persistent session memory for AI agents
+- **[agent-workspace](https://github.com/yunaremaia/agent-workspace)** — isolated workspaces per AI agent session
+- **[agent-guard](https://github.com/yunaremaia/agent-guard)** — enforce guardrails on AI agent tool calls
+- **[driftcheck](https://github.com/yunaremaia/driftcheck)** — detect version drift between docs and toolchain files
+
+Part of a family of focused, single-purpose developer tools — each one does one thing
+and does it well.
 
 ## License
 
