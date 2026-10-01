@@ -1,21 +1,17 @@
 """Tests for YAML memory store parsing and analysis in memwatch."""
 
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 
-import pytest
 import yaml
 from click.testing import CliRunner
 
 from memwatch.cli import cli
 from memwatch.core import (
-    MemoryEntry,
+    _parse_yaml_store_result,
     analyze,
     parse_store,
     parse_yaml_store,
-    _parse_yaml_store_result,
 )
-
 
 # ── Standalone Tests matching Issue Acceptance Criteria ─────────────────────
 

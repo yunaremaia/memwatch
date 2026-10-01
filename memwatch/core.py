@@ -277,7 +277,7 @@ def _is_jsonl(path: str) -> bool:
         return False
     jsonl_count = 0
     for line in lines[:5]:
-        if line.startswith('{') or line.startswith('['):
+        if line.startswith(('{', '[')):
             try:
                 json.loads(line)
                 jsonl_count += 1
@@ -544,8 +544,9 @@ def parse_yaml_store(content_or_path: str) -> list[MemoryEntry]:
 
 def _parse_yaml_store_result(content_or_path: str) -> ParseResult:
     """Parse a YAML memory store and retain details about skipped entries."""
-    import yaml
     from pathlib import Path
+
+    import yaml
 
     raw_content = ""
     source_name = "yaml"
@@ -667,21 +668,26 @@ def parse_store(path: str, fmt: str = "auto") -> list[MemoryEntry]:
 
 def _parse_store_result(path: str, fmt: str = "auto") -> ParseResult:
     """Auto-detect format and retain parser warnings for the analysis summary."""
-    if fmt in ("yaml", "yml") or path.endswith(".yaml") or path.endswith(".yml"):
+    if fmt in ("yaml", "yml") or path.endswith((".yaml", ".yml")):
         return _parse_yaml_store_result(path)
     elif fmt == "jsonl" or path.endswith(".jsonl"):
         return _parse_json_store_result(path, fmt="jsonl")
     elif fmt == "json" or path.endswith(".json"):
         return _parse_json_store_result(path, fmt=fmt)
-    elif fmt in ("sqlite", "db") or path.endswith(".db") or path.endswith(".sqlite"):
+    elif fmt in ("sqlite", "db") or path.endswith((".db", ".sqlite")):
         return ParseResult(parse_sqlite_store(path))
     else:
+        # Auto-detection: probe each parser in turn and fall through on failure.
+        # The broad catch is deliberate — a probe failing for any reason means
+        # "this is not that format". Log the cause so auto-detection stays debuggable.
         try:
             return _parse_json_store_result(path, fmt=fmt)
         except Exception:
+            logger.debug("JSON probe failed, trying YAML", exc_info=True)
             try:
                 return _parse_yaml_store_result(path)
             except Exception:
+                logger.debug("YAML probe failed, falling back to SQLite", exc_info=True)
                 return ParseResult(parse_sqlite_store(path))
 
 

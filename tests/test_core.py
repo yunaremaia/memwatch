@@ -4,22 +4,20 @@ import json
 import sqlite3
 import tempfile
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 
 import pytest
+
 from memwatch.core import (
     MemoryEntry,
+    _age_score,
+    _are_contradictory,
+    _confirmation_score,
+    _jaccard,
     analyze,
     detect_contradictions,
-    find_duplicates,
     parse_json_store,
     parse_sqlite_store,
-    _age_score,
-    _confirmation_score,
-    _are_contradictory,
-    _jaccard,
 )
-
 
 # ── Fixtures ──────────────────────────────────────────────────────────────
 

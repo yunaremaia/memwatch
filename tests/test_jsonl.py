@@ -1,20 +1,13 @@
 """Tests for JSONL parsing support in memwatch."""
 
 import json
-import tempfile
-from datetime import datetime, timezone
-from pathlib import Path
-
-import pytest
+from datetime import datetime
 
 from memwatch.core import (
-    MemoryEntry,
     _is_jsonl,
-    _parse_jsonl_store,
     parse_json_store,
     parse_store,
 )
-
 
 # ── JSONL detection ───────────────────────────────────────────────────
 

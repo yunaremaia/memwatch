@@ -1,23 +1,15 @@
 """CLI for memwatch — agent memory health monitor."""
 
 import json
-import sys
-from pathlib import Path
 
 import click
-from memwatch.core import analyze, StaleReport
+
+from memwatch.core import StaleReport, analyze
 
 
 def _format_report(report: StaleReport, verbose: bool = False) -> str:
     """Format a single report for terminal output."""
     entry = report.entry
-    action_color = {
-        "DELETE": "red",
-        "REVIEW": "yellow",
-        "MERGE": "cyan",
-        "REFRESH": "blue",
-        "KEEP": "green",
-    }.get(report.action, "white")
 
     lines = [
         f"[{report.action}] {entry.id[:40]} (score={report.stale_score:.2f}, age={entry.age_days:.0f}d)",
@@ -130,9 +122,8 @@ def fix(path, dry_run, threshold, store_format):
         click.echo(f"DELETE ({len(to_delete)} entries with score > {threshold}):")
         for r in to_delete:
             click.echo(f"  - {r.entry.id[:50]} (score={r.stale_score:.2f})")
-        if not dry_run:
-            if click.confirm(f"\nDelete {len(to_delete)} entries?"):
-                click.echo("Deleted (placeholder — full implementation writes back to store)")
+        if not dry_run and click.confirm(f"\nDelete {len(to_delete)} entries?"):
+            click.echo("Deleted (placeholder — full implementation writes back to store)")
 
     if to_merge:
         click.echo(f"\nMERGE ({len(to_merge)} entries with duplicates):")

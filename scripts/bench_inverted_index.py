@@ -2,7 +2,8 @@
 """Benchmark: O(n²) scan vs inverted index for contradiction detection."""
 import time
 from datetime import datetime, timezone
-from memwatch.core import MemoryEntry, ContradictionIndex, _detect_contradictions_scan
+
+from memwatch.core import ContradictionIndex, MemoryEntry, _detect_contradictions_scan
 
 
 def make_entries(n: int) -> list[MemoryEntry]:

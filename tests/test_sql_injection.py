@@ -2,12 +2,11 @@
 from __future__ import annotations
 
 import sqlite3
-import tempfile
 from pathlib import Path
 
 import pytest
 
-from memwatch.core import parse_sqlite_store, SAFE_TABLE_RE
+from memwatch.core import SAFE_TABLE_RE, parse_sqlite_store
 
 
 class TestSQLInjectionPrevention:

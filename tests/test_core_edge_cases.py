@@ -20,8 +20,8 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from memwatch.core import (
-    MemoryEntry,
     SAFE_TABLE_RE,
+    MemoryEntry,
     StaleReport,
     _age_score,
     _are_contradictory,
@@ -36,7 +36,6 @@ from memwatch.core import (
     parse_sqlite_store,
     parse_store,
 )
-
 
 # ── Fixtures ─────────────────────────────────────────────────────────────
 
@@ -261,7 +260,9 @@ class TestTimestampParsing:
         assert _parse_ts(original) == original
 
     def test_naive_datetime_gets_utc(self):
-        naive = datetime(2024, 5, 1, 12, 0, 0)
+        # Deliberately naive: the behaviour under test is that _parse_ts treats a
+        # naive datetime as UTC, so DTZ001 does not apply to this construction.
+        naive = datetime(2024, 5, 1, 12, 0, 0)  # noqa: DTZ001
         parsed = _parse_ts(naive)
         assert parsed.tzinfo is not None
         assert parsed == naive.replace(tzinfo=timezone.utc)
