@@ -1,5 +1,7 @@
 # memwatch — Agent Memory Health Monitor
 
+[![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
+
 Monitor AI agent memory stores for rot, contradictions, and duplicates.
 
 ## The Problem
