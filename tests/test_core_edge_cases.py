@@ -16,6 +16,7 @@ derived ``StaleReport.action`` / ``needs_attention`` properties.
 import json
 import sqlite3
 from datetime import datetime, timedelta, timezone
+from typing import ClassVar
 
 import pytest
 
@@ -109,6 +110,90 @@ class TestEmptyStores:
         assert set(result["stats"]) == {
             "avg_stale", "high_risk", "with_contradictions", "with_duplicates",
         }
+
+
+# ── Dict-shaped containers ───────────────────────────────────────────────
+
+class TestDictShapedContainer:
+    """A ``facts``/``memories`` container keyed by entry id, not a list.
+
+    ``list.extend()`` on a mapping yields its keys, so the bare-string path in
+    ``_parse_json_entry`` used to turn every key into an entry whose content
+    was its own id -- hiding contradictions behind a clean report.
+    """
+
+    CONTRADICTING: ClassVar[dict[str, dict[str, str]]] = {
+        "cache_backend": {"content": "redis is enabled for the session cache"},
+        "cache_backend_note": {
+            "content": "redis is not enabled for the session cache",
+        },
+    }
+
+    def test_dict_container_keeps_entry_body_as_content(self, tmp_path):
+        """``{"facts": {"k": {"content": ...}}}`` parses id from the key."""
+        path = _write_json(tmp_path, {"facts": self.CONTRADICTING})
+        assert [(e.id, e.content) for e in parse_json_store(path)] == [
+            ("cache_backend", "redis is enabled for the session cache"),
+            ("cache_backend_note", "redis is not enabled for the session cache"),
+        ]
+
+    def test_dict_container_scalar_value_becomes_content(self, tmp_path):
+        """A non-object value in a dict container is stringified as content."""
+        path = _write_json(tmp_path, {"facts": {"note": "plain string fact"}})
+        entry = parse_json_store(path)[0]
+        assert (entry.id, entry.content) == ("note", "plain string fact")
+
+    def test_contradiction_inside_dict_container_is_detected(self, tmp_path):
+        """A real contradiction must be reported, not parsed away."""
+        result = analyze(_write_json(tmp_path, {"facts": self.CONTRADICTING}))
+        assert result["total_entries"] == 2
+        assert result["stats"]["with_contradictions"] == 2
+        assert result["flagged"]
+
+    def test_dict_and_list_containers_parse_to_the_same_entries(self, tmp_path):
+        """Both shapes of the same store must yield identical entries."""
+        as_dict = parse_json_store(_write_json(tmp_path, {"facts": self.CONTRADICTING}))
+        as_list = parse_json_store(_write_json(tmp_path, {"facts": [
+            {"id": k, **v} for k, v in self.CONTRADICTING.items()
+        ]}, name="store_list.json"))
+        assert [(e.id, e.content) for e in as_dict] == [
+            (e.id, e.content) for e in as_list
+        ]
+
+    def test_dict_container_entry_fields_are_parsed(self, tmp_path):
+        """Extra fields from the entry body survive, as in the list form."""
+        path = _write_json(tmp_path, {"facts": {
+            "f1": {
+                "content": "uses pydantic for validation",
+                "created_at": "2026-01-15T10:00:00Z",
+                "confirmed_count": 5,
+            },
+        }})
+        entry = parse_json_store(path)[0]
+        assert entry.id == "f1"
+        assert entry.content == "uses pydantic for validation"
+        assert entry.confirmed_count == 5
+
+    def test_list_container_still_parses_unchanged(self, tmp_path):
+        """The documented list shape keeps working (no regression)."""
+        path = _write_json(tmp_path, {"facts": [
+            {"id": "a", "content": "uses postgres for the database",
+             "created_at": "2026-01-01T00:00:00Z"},
+            {"id": "b", "content": "uses mysql for the database",
+             "created_at": "2026-01-01T00:00:00Z"},
+        ]})
+        assert [(e.id, e.content) for e in parse_json_store(path)] == [
+            ("a", "uses postgres for the database"),
+            ("b", "uses mysql for the database"),
+        ]
+
+    def test_multiple_container_keys_are_all_read(self, tmp_path):
+        """Facts and memories containers are both parsed, as before the fix."""
+        path = _write_json(tmp_path, {
+            "facts": {"f1": {"content": "first fact"}},
+            "memories": {"m1": {"content": "first memory"}},
+        })
+        assert [e.id for e in parse_json_store(path)] == ["f1", "m1"]
 
 
 # ── Malformed entries ────────────────────────────────────────────────────

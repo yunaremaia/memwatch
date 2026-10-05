@@ -373,6 +373,18 @@ def _parse_json_entry(
     return entry, None
 
 
+def _mapping_items(mapping: dict[Any, Any]) -> list[dict[str, Any]]:
+    """Build entry items from an ``{id: body}`` mapping, keeping the body.
+
+    A mapping is a valid container shape: the key is the entry id and the
+    value is the entry object (or a bare string treated as its content).
+    """
+    return [
+        {"id": k, **v} if isinstance(v, dict) else {"id": k, "content": str(v)}
+        for k, v in mapping.items()
+    ]
+
+
 def _parse_json_store_result(path: str, fmt: str = "auto") -> ParseResult:
     """Parse a JSON store and retain details about invalid entries."""
     if fmt == "auto":
@@ -390,13 +402,17 @@ def _parse_json_store_result(path: str, fmt: str = "auto") -> ParseResult:
         items = data
     elif isinstance(data, dict):
         for key in ("facts", "episodes", "memories", "entries"):
-            if key in data:
-                items.extend(data[key])
+            if key not in data:
+                continue
+            container = data[key]
+            # list.extend() on a mapping yields its keys, which would turn
+            # every entry id into its own content (issue #90).
+            if isinstance(container, dict):
+                items.extend(_mapping_items(container))
+            elif isinstance(container, list):
+                items.extend(container)
         if not items:
-            items = [
-                {"id": k, **v} if isinstance(v, dict) else {"id": k, "content": str(v)}
-                for k, v in data.items()
-            ]
+            items = _mapping_items(data)
 
     for entry_num, item in enumerate(items, 1):
         entry, skipped = _parse_json_entry(item, f"entry {entry_num}")
