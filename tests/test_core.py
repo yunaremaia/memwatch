@@ -235,12 +235,12 @@ def test_contradiction_index_class():
     assert not any("c" in pair for pair in candidates)
 
 
-def test_tokenize_filters_short_tokens():
-    """_tokenize drops tokens shorter than 3 chars."""
+def test_tokenize_includes_short_tokens():
+    """_tokenize includes all tokens, even short ones (needed for index candidate generation)."""
     from memwatch.core import _tokenize
     tokens = _tokenize("I am a go dev")
-    assert "i" not in tokens
-    assert "am" not in tokens
+    assert "i" in tokens
+    assert "am" in tokens
     assert "dev" in tokens
 
 

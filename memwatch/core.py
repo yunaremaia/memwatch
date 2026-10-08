@@ -174,7 +174,7 @@ def _detect_contradictions_index(entries: list[MemoryEntry]) -> dict[str, list[M
 
 def _tokenize(text: str) -> set[str]:
     """Tokenize text into normalized words for indexing."""
-    return {w for w in text.lower().split() if len(w) >= 3}
+    return set(text.lower().split())
 
 
 def _normalize(text: str) -> set[str]:
