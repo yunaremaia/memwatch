@@ -38,3 +38,12 @@ Issues = "https://github.com/yunaremaia/memwatch/issues"
 [tool.setuptools.packages.find]
 include = ["memwatch*"]
 exclude = ["tests*"]
+
+[tool.pytest.ini_options]
+addopts = "--cov=memwatch --cov-report=term-missing"
+
+[tool.coverage.run]
+source = ["memwatch"]
+
+[tool.coverage.report]
+fail_under = 90
